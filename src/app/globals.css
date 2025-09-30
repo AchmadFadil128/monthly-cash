@@ -1,0 +1,9 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Pastel Blue Theme Colors */
+.bg-blue-pastel { @apply bg-blue-100; }
+.text-blue-pastel { @apply text-blue-600; }
+.border-blue-pastel { @apply border-blue-200; }
+.hover-bg-blue-pastel:hover { @apply bg-blue-50; }
