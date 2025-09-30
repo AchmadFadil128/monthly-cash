@@ -36,6 +36,8 @@
     "typescript": "^5.9.2"
   },
   "devDependencies": {
+    "@types/node": "^24.6.0",
+    "@types/pg": "^8.15.5",
     "@types/react": "19.1.16",
     "autoprefixer": "^10.4.21",
     "drizzle-kit": "^0.30.4",

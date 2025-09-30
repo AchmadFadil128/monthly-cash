@@ -1,4 +1,4 @@
-import { NextRequest } from 'next/server';
+import { type NextRequest } from 'next/server';
 import { db } from '@/db';
 import { transactions, Transaction, NewTransaction } from '@/db/schema';
 import { eq, sql } from 'drizzle-orm';
@@ -6,10 +6,12 @@ import { eq, sql } from 'drizzle-orm';
 // GET: Get a specific transaction by ID
 export async function GET(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const id = Number(params.id);
+    // params is a Promise in Next.js App Router
+    const resolvedParams = await params;
+    const id = Number(resolvedParams.id);
     
     if (isNaN(id)) {
       return new Response(JSON.stringify({ error: 'Invalid transaction ID' }), {
@@ -46,10 +48,12 @@ export async function GET(
 // PUT: Update a specific transaction by ID
 export async function PUT(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const id = Number(params.id);
+    // params is a Promise in Next.js App Router
+    const resolvedParams = await params;
+    const id = Number(resolvedParams.id);
     if (isNaN(id)) {
       return new Response(JSON.stringify({ error: 'Invalid transaction ID' }), {
         status: 400,
@@ -113,10 +117,12 @@ export async function PUT(
 // DELETE: Delete a specific transaction by ID
 export async function DELETE(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const id = Number(params.id);
+    // params is a Promise in Next.js App Router
+    const resolvedParams = await params;
+    const id = Number(resolvedParams.id);
     
     if (isNaN(id)) {
       return new Response(JSON.stringify({ error: 'Invalid transaction ID' }), {
@@ -125,16 +131,23 @@ export async function DELETE(
       });
     }
     
-    const deletedRows = await db
-      .delete(transactions)
+    // First, check if the transaction exists
+    const [existingTransaction] = await db
+      .select()
+      .from(transactions)
       .where(eq(transactions.id, id));
     
-    if (deletedRows.count === 0) {
+    if (!existingTransaction) {
       return new Response(JSON.stringify({ error: 'Transaction not found' }), {
         status: 404,
         headers: { 'Content-Type': 'application/json' },
       });
     }
+    
+    // Delete the transaction
+    await db
+      .delete(transactions)
+      .where(eq(transactions.id, id));
     
     return new Response(JSON.stringify({ message: 'Transaction deleted successfully' }), {
       status: 200,

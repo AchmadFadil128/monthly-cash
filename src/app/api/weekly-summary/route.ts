@@ -1,6 +1,6 @@
 import { NextRequest } from 'next/server';
 import { db } from '@/db';
-import { transactions } from '@/db/schema';
+import { transactions, Transaction } from '@/db/schema';
 import { sql, and, gte, lte } from 'drizzle-orm';
 
 export async function GET(request: NextRequest) {
@@ -22,7 +22,7 @@ export async function GET(request: NextRequest) {
       .where(and(
         gte(transactions.tanggal, startOfMonth),
         lte(transactions.tanggal, endOfMonth)
-      ));
+      )) as Transaction[]; // Type assertion to ensure correct typing
     
     // Calculate total balance
     let totalBalance = 0;
