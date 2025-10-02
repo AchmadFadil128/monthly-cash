@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import { Button } from '@/components/ui/button';
 import { formatCurrency } from '@/lib/currency';
-import { TrendingUp, TrendingDown, Wallet, ArrowUpRight, Calendar } from 'lucide-react';
+import { TrendingUp, TrendingDown, Wallet, ArrowUpRight, Calendar, Check } from 'lucide-react';
 
 interface WeeklySummary {
   week: string;
@@ -12,32 +12,166 @@ interface WeeklySummary {
   Expense: number;
 }
 
+interface ChecklistData {
+  [name: string]: {
+    [week: number]: boolean;
+  };
+}
+
 const Dashboard = () => {
   const [weeklyData, setWeeklyData] = useState<WeeklySummary[]>([]);
   const [totalBalance, setTotalBalance] = useState<number>(0);
   const [loading, setLoading] = useState<boolean>(true);
+  const [checklist, setChecklist] = useState<ChecklistData>({});
+
+  const names = ['Achmad', 'Dimas', 'Lutfi', 'Maulana', 'Riski'];
+  const CHECKLIST_AMOUNT = 40000; // 40k per checklist
+
+  // Get number of weeks in current month
+  const getWeeksInMonth = () => {
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = now.getMonth();
+    const firstDay = new Date(year, month, 1);
+    const lastDay = new Date(year, month + 1, 0);
+    const daysInMonth = lastDay.getDate();
+    const weeks = Math.ceil((daysInMonth + firstDay.getDay()) / 7);
+    return weeks;
+  };
+
+  const weeksInMonth = getWeeksInMonth();
+
+  // Initialize checklist data structure
+  const initializeChecklist = (): ChecklistData => {
+    const initialData: ChecklistData = {};
+    names.forEach(name => {
+      initialData[name] = {};
+      for (let i = 1; i <= weeksInMonth; i++) {
+        initialData[name][i] = false;
+      }
+    });
+    return initialData;
+  };
+
+  // Load checklist state from database
+  const loadChecklistFromDB = async (): Promise<ChecklistData> => {
+    try {
+      const response = await fetch('/api/transactions');
+      if (!response.ok) {
+        throw new Error('Failed to fetch transactions');
+      }
+      
+      const transactions = await response.json();
+      
+      // Initialize checklist with default values
+      const checklistData = initializeChecklist();
+      
+      // Process transactions to identify checklist entries
+      transactions.forEach((transaction: any) => {
+        // Match transactions that follow the pattern "Iuran {name} - Minggu {week}"
+        const checklistPattern = /^Iuran\s+(.+?)\s*-\s*Minggu\s+(\d+)$/;
+        const match = transaction.namaKeperluan.match(checklistPattern);
+        
+        if (match) {
+          const name = match[1].trim();
+          const week = parseInt(match[2]);
+          
+          // Check if the name is in our names array and week is valid
+          if (names.includes(name) && week >= 1 && week <= weeksInMonth) {
+            // Mark as checked if transaction is an Income of the correct amount
+            if (transaction.kategori === 'Income' && transaction.nominal === CHECKLIST_AMOUNT) {
+              checklistData[name][week] = true;
+            }
+          }
+        }
+      });
+
+      return checklistData;
+    } catch (error) {
+      console.error('Error loading checklist from database:', error);
+      return initializeChecklist(); // Return default checklist on error
+    }
+  };
 
   useEffect(() => {
-    const fetchWeeklySummary = async () => {
+    const initializeData = async () => {
       try {
-        const response = await fetch('/api/weekly-summary');
-        if (response.ok) {
-          const data = await response.json();
+        // Fetch weekly summary
+        const weeklyResponse = await fetch('/api/weekly-summary');
+        if (weeklyResponse.ok) {
+          const data = await weeklyResponse.json();
           setWeeklyData(data.weeklyData);
           setTotalBalance(data.totalBalance);
         }
+
+        // Load checklist from database
+        const loadedChecklist = await loadChecklistFromDB();
+        setChecklist(loadedChecklist);
       } catch (error) {
-        console.error('Error fetching weekly summary:', error);
+        console.error('Error initializing data:', error);
       } finally {
         setLoading(false);
       }
     };
-    fetchWeeklySummary();
-  }, []);
+
+    initializeData();
+  }, [weeksInMonth]);
 
   // Calculate total income and expense
   const totalIncome = weeklyData.reduce((sum, week) => sum + week.Income, 0);
   const totalExpense = weeklyData.reduce((sum, week) => sum + week.Expense, 0);
+
+  // Calculate checklist income
+  const checklistIncome = Object.values(checklist).reduce((total, person) => {
+    const personChecked = Object.values(person).filter(Boolean).length;
+    return total + (personChecked * CHECKLIST_AMOUNT);
+  }, 0);
+
+  const handleCheckboxChange = async (name: string, week: number) => {
+    const isChecked = !checklist[name][week];
+    const transactionData = {
+      tanggal: new Date().toISOString().split('T')[0],
+      namaKeperluan: `Iuran ${name} - Minggu ${week}`,
+      kategori: 'Income',
+      nominal: CHECKLIST_AMOUNT
+    };
+
+    try {
+      if (isChecked) {
+        // Add income transaction
+        await fetch('/api/transactions', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(transactionData),
+        });
+      } else {
+        // To remove a checklist item, we need an endpoint to delete transactions by name and week
+        // For now, let's add a method to delete specific checklist transactions
+        const response = await fetch(`/api/transactions/checklist/${name}/${week}`, {
+          method: 'DELETE',
+          headers: { 'Content-Type': 'application/json' },
+        });
+        
+        if (!response.ok) {
+          console.error('Failed to delete checklist transaction');
+        }
+      }
+      
+      // Refresh weekly summary and checklist from database
+      const weeklyResponse = await fetch('/api/weekly-summary');
+      if (weeklyResponse.ok) {
+        const data = await weeklyResponse.json();
+        setWeeklyData(data.weeklyData);
+        setTotalBalance(data.totalBalance);
+      }
+      
+      // Reload checklist from database to reflect the current state
+      const updatedChecklist = await loadChecklistFromDB();
+      setChecklist(updatedChecklist);
+    } catch (error) {
+      console.error('Error updating transaction:', error);
+    }
+  };
 
   if (loading) {
     return (
@@ -120,7 +254,7 @@ const Dashboard = () => {
         </div>
 
         {/* Chart Section */}
-        <div className="bg-white rounded-2xl shadow-md border border-gray-100 p-6 md:p-8">
+        <div className="bg-white rounded-2xl shadow-md border border-gray-100 p-6 md:p-8 mb-8">
           <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-6">
             <div>
               <h2 className="text-xl md:text-2xl font-bold text-gray-800 mb-1">
@@ -222,6 +356,97 @@ const Dashboard = () => {
               </div>
             </div>
           )}
+        </div>
+
+        {/* Checklist Table */}
+        <div className="bg-white rounded-2xl shadow-md border border-gray-100 p-6 md:p-8">
+          <div className="flex justify-between items-center mb-6">
+            <div>
+              <h2 className="text-xl md:text-2xl font-bold text-gray-800 mb-1">
+                Daftar Iuran Anggota
+              </h2>
+              <p className="text-sm text-gray-500">
+                Checklist iuran bulanan - {formatCurrency(CHECKLIST_AMOUNT)} per minggu
+              </p>
+            </div>
+            <div className="bg-gradient-to-r from-green-50 to-emerald-50 px-4 py-2 rounded-xl border border-green-200">
+              <p className="text-sm text-gray-600">Total Iuran Terkumpul</p>
+              <p className="text-xl font-bold text-green-600">{formatCurrency(checklistIncome)}</p>
+            </div>
+          </div>
+
+          <div className="overflow-x-auto">
+            <table className="w-full border-collapse">
+              <thead>
+                <tr className="bg-gradient-to-r from-indigo-50 to-purple-50">
+                  <th className="border border-gray-200 px-4 py-3 text-left font-semibold text-gray-700 rounded-tl-xl">
+                    Nama
+                  </th>
+                  {Array.from({ length: weeksInMonth }, (_, i) => (
+                    <th key={i + 1} className="border border-gray-200 px-4 py-3 text-center font-semibold text-gray-700">
+                      Minggu {i + 1}
+                    </th>
+                  ))}
+                  <th className="border border-gray-200 px-4 py-3 text-center font-semibold text-gray-700 rounded-tr-xl">
+                    Total
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {names.map((name, nameIndex) => {
+                  const checkedCount = Object.values(checklist[name] || {}).filter(Boolean).length;
+                  const personTotal = checkedCount * CHECKLIST_AMOUNT;
+                  
+                  return (
+                    <tr key={name} className="hover:bg-gray-50 transition-colors">
+                      <td className={`border border-gray-200 px-4 py-3 font-medium text-gray-800 ${nameIndex === names.length - 1 ? 'rounded-bl-xl' : ''}`}>
+                        {name}
+                      </td>
+                      {Array.from({ length: weeksInMonth }, (_, i) => (
+                        <td key={i + 1} className="border border-gray-200 px-4 py-3 text-center">
+                          <button
+                            onClick={() => handleCheckboxChange(name, i + 1)}
+                            className={`w-8 h-8 rounded-lg border-2 transition-all duration-200 flex items-center justify-center ${
+                              checklist[name]?.[i + 1]
+                                ? 'bg-gradient-to-br from-green-500 to-emerald-600 border-green-600 shadow-md'
+                                : 'bg-white border-gray-300 hover:border-indigo-400'
+                            }`}
+                          >
+                            {checklist[name]?.[i + 1] && (
+                              <Check className="w-5 h-5 text-white" strokeWidth={3} />
+                            )}
+                          </button>
+                        </td>
+                      ))}
+                      <td className={`border border-gray-200 px-4 py-3 text-center font-bold ${
+                        personTotal > 0 ? 'text-green-600' : 'text-gray-400'
+                      } ${nameIndex === names.length - 1 ? 'rounded-br-xl' : ''}`}>
+                        {formatCurrency(personTotal)}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+
+          {/* Summary Footer */}
+          <div className="mt-6 flex justify-between items-center p-4 bg-gradient-to-r from-indigo-50 to-purple-50 rounded-xl">
+            <div className="flex items-center gap-2 text-gray-600">
+              <Check className="w-5 h-5 text-green-600" />
+              <span className="text-sm">
+                {Object.values(checklist).reduce((total, person) => 
+                  total + Object.values(person).filter(Boolean).length, 0
+                )} dari {names.length * weeksInMonth} checklist terisi
+              </span>
+            </div>
+            <div className="text-right">
+              <p className="text-sm text-gray-600">Total Keseluruhan</p>
+              <p className="text-2xl font-bold bg-gradient-to-r from-indigo-600 to-purple-600 bg-clip-text text-transparent">
+                {formatCurrency(checklistIncome)}
+              </p>
+            </div>
+          </div>
         </div>
       </div>
     </div>
